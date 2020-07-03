@@ -56,6 +56,11 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
         EvaluateCollision(collision);
     }
 
+    private Vector3 ProjectOnContactPlane(Vector3 vector)
+    {
+        return vector - _contactNormal * Vector3.Dot(vector, _contactNormal);
+    }
+
     void EvaluateCollision(Collision collision) 
     {
         for (int i = 0; i < collision.contactCount; i++)
@@ -64,11 +69,12 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
             if (normal.y >= _minGroundDotProduct)
             {
                 _onGround = true;
-                _contactNormal = normal;
+                _contactNormal += normal;
             }
             if (_onGround)
             {
                 _jumpPhase = 0;
+                _contactNormal.Normalize();
             }
             else
             {
@@ -77,8 +83,25 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
         }
     }
 
+    void AdjustVelocity(Vector3 desiredVelocity)
+    {
+        Vector3 xAxis = ProjectOnContactPlane(Vector3.right).normalized;
+        Vector3 zAxis = ProjectOnContactPlane(Vector3.forward).normalized;
+        float currentX = Vector3.Dot(_velocity, xAxis);
+        float currentZ = Vector3.Dot(_velocity, zAxis);
+        float acceleration = _onGround ? _maxAcceleration : _maxAirAcceleration;
+        float maxSpeedChange = acceleration * Time.deltaTime;
+
+        float newX =
+            Mathf.MoveTowards(currentX, desiredVelocity.x, maxSpeedChange);
+        float newZ =
+            Mathf.MoveTowards(currentZ, desiredVelocity.z, maxSpeedChange);
+        _velocity += xAxis * (newX - currentX) + zAxis * (newZ - currentZ);
+    }
+
     public void OnMove(InputAction.CallbackContext context)
     {
+        Debug.Log(context.ReadValue<Vector2>());
         _playerInput = context.ReadValue<Vector2>();
         _playerInput = Vector2.ClampMagnitude(_playerInput, 1f);
         StopCoroutine(_inst);
@@ -93,15 +116,17 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
             init = false;
             Vector3 desiredVelocity = new Vector3(playerInput.x, 0f, playerInput.y) * _maxSpeed;
             _velocity = _body.velocity;
-            float acceleration = _onGround ? _maxAcceleration : _maxAirAcceleration;
-            float maxSpeedChange = acceleration * Time.deltaTime;
-            _velocity.x = Mathf.MoveTowards(_velocity.x, desiredVelocity.x, maxSpeedChange);
-            _velocity.z = Mathf.MoveTowards(_velocity.z, desiredVelocity.z, maxSpeedChange);
+            AdjustVelocity(desiredVelocity);
             _body.velocity = _velocity;
-            _onGround = false;
+            ClearState();
             yield return new WaitForEndOfFrame();
         }
 
+    }
+    void ClearState()
+    {
+        _onGround = false;
+        _contactNormal = Vector3.zero;
     }
 
     public void OnJump(InputAction.CallbackContext context)
