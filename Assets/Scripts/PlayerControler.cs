@@ -18,12 +18,23 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
     [SerializeField, Range(0, 5)]
     private int _maxAirJumps = 0;
     private int _jumpPhase;
+    [SerializeField, Range(0f, 90f)]
+    private float _maxGroundAngle = 25f;
+    private Coroutine _inst = null;
+    private float _minGroundDotProduct;
+    private Vector3 _contactNormal;
 
+    void OnValidate()
+    {
+        _minGroundDotProduct = math.cos(_maxGroundAngle * Mathf.Deg2Rad);
+    }
     private void Awake()
     {
         _playerControls = new PlayerInputActions();
         _playerControls.Player.SetCallbacks(this);
+        OnValidate();
         _body = GetComponent<Rigidbody>();
+        _inst = StartCoroutine(MoveRoutine(_playerInput));
     }
     private void OnEnable()
     {
@@ -31,7 +42,7 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
     }
     private void OnDisable()
     {
-        StopCoroutine("MoveRoutine");
+        StopCoroutine(_inst);
         _playerControls.Player.Disable();
     }
 
@@ -50,8 +61,19 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
         for (int i = 0; i < collision.contactCount; i++)
         {
             Vector3 normal = collision.GetContact(i).normal;
-            _onGround |= normal.y >= 0.9f;
-            _jumpPhase = 0;
+            if (normal.y >= _minGroundDotProduct)
+            {
+                _onGround = true;
+                _contactNormal = normal;
+            }
+            if (_onGround)
+            {
+                _jumpPhase = 0;
+            }
+            else
+            {
+                _contactNormal = Vector3.up;
+            }
         }
     }
 
@@ -59,8 +81,8 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
     {
         _playerInput = context.ReadValue<Vector2>();
         _playerInput = Vector2.ClampMagnitude(_playerInput, 1f);
-        StopCoroutine("MoveRoutine");
-        StartCoroutine("MoveRoutine", _playerInput);
+        StopCoroutine(_inst);
+        _inst = StartCoroutine(MoveRoutine(_playerInput));
     }
 
     private IEnumerator MoveRoutine(Vector2 playerInput)
@@ -90,14 +112,15 @@ public class PlayerControler : MonoBehaviour, PlayerInputActions.IPlayerActions
             {
                 _jumpPhase += 1;
                 float jumpSpeed = math.sqrt(-2f * Physics.gravity.y * _jumpHeight);
-                if (_velocity.y > 0f)
+                float alignedSpeed = Vector3.Dot(_velocity, _contactNormal);
+                if (alignedSpeed > 0f)
                 {
-                    jumpSpeed = math.max(jumpSpeed - _velocity.y, 0f);
+                    jumpSpeed = math.max(jumpSpeed - alignedSpeed, 0f);
                 }
-                _velocity.y += jumpSpeed;
+                _velocity += _contactNormal * jumpSpeed;
                 _body.velocity = _velocity;
-                StopCoroutine("MoveRoutine");
-                StartCoroutine("MoveRoutine", _playerInput);
+                StopCoroutine(_inst);
+                _inst = StartCoroutine(MoveRoutine(_playerInput));
             }
         }
     }
